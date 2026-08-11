@@ -1,1 +1,110 @@
+name: build-swipeselection-fix
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Get SwipeSelection source
+        run: git clone --depth 1 https://github.com/brendonjkding/SwipeSelection.git src
+
+      - name: Apply pinyin-123 fix patch
+        run: |
+          cat > /tmp/fixpatch.py << 'PYEOF'
+          import io, sys
+
+          TWEAK = "src/Tweak.xm"
+          CONTROL = "src/control"
+
+          s = io.open(TWEAK, encoding="utf-8").read()
+          orig = s
+
+          HELPER = (
+              "\n/* pinyin 123 fix: robust more-key detection */\n"
+              "static BOOL SSIsMoreKeyObject(UIKBKey *keyObject, NSString *key){\n"
+              "\tif (key){\n"
+              "\t\tif ([key hasPrefix:@\"more\"]) return YES;\n"
+              "\t\tif ([key isEqualToString:@\"123\"]) return YES;\n"
+              "\t\tif ([key isEqualToString:@\"abc\"]) return YES;\n"
+              "\t\tif ([key isEqualToString:@\"letters\"]) return YES;\n"
+              "\t}\n"
+              "\tif (keyObject){\n"
+              "\t\tNSString *kname = [[keyObject name] lowercaseString];\n"
+              "\t\tif (kname){\n"
+              "\t\t\tif ([kname hasPrefix:@\"more\"]) return YES;\n"
+              "\t\t\tif ([kname isEqualToString:@\"123\"]) return YES;\n"
+              "\t\t\tif ([kname isEqualToString:@\"letters\"]) return YES;\n"
+              "\t\t}\n"
+              "\t\tNSString *disp = [[keyObject displayString] lowercaseString];\n"
+              "\t\tif (disp){\n"
+              "\t\t\tif ([disp isEqualToString:@\"123\"]) return YES;\n"
+              "\t\t\tif ([disp isEqualToString:@\"abc\"]) return YES;\n"
+              "\t\t}\n"
+              "\t}\n"
+              "\treturn NO;\n"
+              "}\n\n"
+          )
+
+          # 1) hit-test in the layout's own coordinate space (touch.view is wrong on iOS 15 pinyin)
+          s = s.replace("[touch locationInView:touch.view]", "[touch locationInView:self]")
+
+          # 2) robust more-key matching in touchesBegan / touchesMoved
+          s = s.replace("[key isEqualToString:@\"more\"]", "SSIsMoreKeyObject(keyObject, key)")
+
+          # 3) nil-safe hit test fallback in touchesBegan / touchesMoved
+          old_hit = "UIKBKey *keyObject = [self keyHitTest:[touch locationInView:self]];"
+          new_hit = ("UIKBKey *keyObject = [self keyHitTest:[touch locationInView:self]];\n"
+                     "\tif (!keyObject && [self respondsToSelector:@selector(keyHitTestClosestToPoint:)]) { keyObject = [self keyHitTestClosestToPoint:[touch locationInView:self]]; }")
+          s = s.replace(old_hit, new_hit)
+
+          # 4) same fallback in touchesEnded
+          old_end = "NSString *key = [[[self keyHitTest:[touch locationInView:self]] representedString] lowercaseString];"
+          new_end = ("UIKBKey *endKey = [self keyHitTest:[touch locationInView:self]];\n"
+                     "\tif (!endKey && [self respondsToSelector:@selector(keyHitTestClosestToPoint:)]) { endKey = [self keyHitTestClosestToPoint:[touch locationInView:self]]; }\n"
+                     "\tNSString *key = [[endKey representedString] lowercaseString];")
+          s = s.replace(old_end, new_end)
+
+          # 5) inject helper before the layout hook
+          anchor = "%hook UIKeyboardLayoutStar"
+          if anchor not in s:
+              sys.exit("patch failed: hook anchor not found")
+          s = s.replace(anchor, HELPER + anchor, 1)
+
+          if s == orig:
+              sys.exit("patch failed: no changes applied")
+          io.open(TWEAK, "w", encoding="utf-8").write(s)
+
+          c = io.open(CONTROL, encoding="utf-8").read()
+          c = c.replace("Version: 1.5.3", "Version: 1.5.4")
+          io.open(CONTROL, "w", encoding="utf-8").write(c)
+
+          print("patch ok, more-key check count:", s.count("SSIsMoreKeyObject"))
+          PYEOF
+          python3 /tmp/fixpatch.py
+
+      - name: Setup theos
+        run: |
+          brew install ldid dpkg
+          git clone --depth 1 --recursive https://github.com/theos/theos.git "$HOME/theos"
+          curl -L -o /tmp/sdks.tar.gz https://github.com/theos/sdks/archive/refs/heads/master.tar.gz
+          mkdir -p "$HOME/theos/sdks"
+          tar -xzf /tmp/sdks.tar.gz -C "$HOME/theos/sdks" --strip-components=1
+
+      - name: Build rootless deb
+        working-directory: src
+        env:
+          THEOS: /Users/runner/theos
+        run: |
+          export PATH="$THEOS/bin:$PATH"
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless TARGET="iphone:clang:latest:15.0" ARCHS="arm64 arm64e" DEBUG=0
+          ls -la packages/
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: SwipeSelection-1.5.4-pinyin123fix-rootless-deb
+          path: src/packages/*.deb
 
