@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - name: Get SwipeSelection source
         run: git clone --depth 1 https://github.com/brendonjkding/SwipeSelection.git src
@@ -92,6 +92,7 @@ jobs:
           curl -L -o /tmp/sdks.tar.gz https://github.com/theos/sdks/archive/refs/heads/master.tar.gz
           mkdir -p "$HOME/theos/sdks"
           tar -xzf /tmp/sdks.tar.gz -C "$HOME/theos/sdks" --strip-components=1
+          ls "$HOME/theos/sdks"
 
       - name: Build rootless deb
         working-directory: src
@@ -99,12 +100,27 @@ jobs:
           THEOS: /Users/runner/theos
         run: |
           export PATH="$THEOS/bin:$PATH"
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless TARGET="iphone:clang:latest:15.0" ARCHS="arm64 arm64e" DEBUG=0
-          ls -la packages/
+          set -o pipefail
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless TARGET="iphone:clang:latest:15.0" ARCHS="arm64 arm64e" DEBUG=0 2>&1 | tee build.log
 
-      - name: Upload deb
+      - name: Diagnose
+        if: always()
+        working-directory: src
+        run: |
+          echo "## Build result" >> "$GITHUB_STEP_SUMMARY"
+          ls -la packages/ >> "$GITHUB_STEP_SUMMARY" 2>&1 || echo "no packages dir" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Last 120 lines of build log" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -n 120 build.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "no build.log" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deb and log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: SwipeSelection-1.5.4-pinyin123fix-rootless-deb
-          path: src/packages/*.deb
-
+          if-no-files-found: warn
+          path: |
+            src/packages/*.deb
+            src/build.log
