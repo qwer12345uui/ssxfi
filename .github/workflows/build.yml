@@ -106,14 +106,33 @@ jobs:
       - name: Diagnose
         if: always()
         working-directory: src
+        env:
+          THEOS: /Users/runner/theos
         run: |
-          echo "## Build result" >> "$GITHUB_STEP_SUMMARY"
-          ls -la packages/ >> "$GITHUB_STEP_SUMMARY" 2>&1 || echo "no packages dir" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "### Last 120 lines of build log" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          tail -n 120 build.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "no build.log" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## Build result"
+            ls -la packages/ 2>&1 || echo "no packages dir"
+            echo ""
+            echo "### Last 120 lines of build log"
+            echo '```'
+            tail -n 120 build.log 2>/dev/null || echo "no build.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          sdks=$(ls "$THEOS/sdks" 2>/dev/null | tr '\n' ' ')
+          echo "::notice::SDKs available: $sdks"
+          if [ -f build.log ]; then
+            clean=$(mktemp)
+            sed -e 's/\x1b\[[0-9;]*m//g' build.log > "$clean"
+            grep -nEi "error:|fatal|undefined|no such|not found|no rule|cannot|could not|unsupported|invalid|failed" "$clean" | tail -n 25 > /tmp/errs.txt || true
+            while IFS= read -r line; do
+              esc=$(printf '%s' "$line" | sed 's/%/%25/g; s/\r/%0D/g')
+              echo "::error::$esc"
+            done < /tmp/errs.txt
+            tailmsg=$(tail -n 60 "$clean" | sed 's/%/%25/g; s/\r/%0D/g; s/$/%0A/' | tr -d '\n')
+            echo "::error::BUILDLOGTAIL $tailmsg"
+          else
+            echo "::error::build.log not found"
+          fi
 
       - name: Upload deb and log
         if: always()
