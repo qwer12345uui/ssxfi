@@ -18,6 +18,7 @@ jobs:
 
           TWEAK = "src/Tweak.xm"
           CONTROL = "src/control"
+          MK = "src/Makefile"
 
           s = io.open(TWEAK, encoding="utf-8").read()
           orig = s
@@ -80,6 +81,12 @@ jobs:
           c = io.open(CONTROL, encoding="utf-8").read()
           c = c.replace("Version: 1.5.3", "Version: 1.5.4")
           io.open(CONTROL, "w", encoding="utf-8").write(c)
+
+          # 6) v4: deprecated UIKit APIs are errors on new SDK, downgrade them to warnings
+          m = io.open(MK, encoding="utf-8").read()
+          if "deprecated-declarations" not in m:
+              m = m.rstrip("\n") + "\n\n# allow deprecated UIKit APIs (build fix)\nADDITIONAL_CFLAGS += -Wno-error=deprecated-declarations -Wno-deprecated-declarations\n"
+              io.open(MK, "w", encoding="utf-8").write(m)
 
           print("patch ok, more-key check count:", s.count("SSIsMoreKeyObject"))
           PYEOF
