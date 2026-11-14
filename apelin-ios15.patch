@@ -13915,10 +13915,10 @@ index 0000000..e7e30e4
 +}
 diff --git a/Packages/MarkdownView/Sources/MarkdownView/MarkdownView+SwiftUI/MarkdownView+Coordinator.swift b/Packages/MarkdownView/Sources/MarkdownView/MarkdownView+SwiftUI/MarkdownView+Coordinator.swift
 new file mode 100644
-index 0000000..4682439
+index 0000000..574d63f
 --- /dev/null
 +++ b/Packages/MarkdownView/Sources/MarkdownView/MarkdownView+SwiftUI/MarkdownView+Coordinator.swift
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,154 @@
 +//
 +//  MarkdownView+Coordinator.swift
 +//  MarkdownView
@@ -14001,6 +14001,7 @@ index 0000000..4682439
 +        pendingIsStreaming = nil
 +    }
 +
++    @available(iOS 16.0, macOS 13.0, *)
 +    func sizeThatFits(_ proposal: ProposedViewSize, for view: MarkdownTextView) -> CGSize? {
 +        // A zero-width proposal asks for the minimum width. Text can wrap to
 +        // any width, so answer with zero — reporting the current layout width
@@ -14074,10 +14075,10 @@ index 0000000..4682439
 +}
 diff --git a/Packages/MarkdownView/Sources/MarkdownView/MarkdownView+SwiftUI/MarkdownView+Representable.swift b/Packages/MarkdownView/Sources/MarkdownView/MarkdownView+SwiftUI/MarkdownView+Representable.swift
 new file mode 100644
-index 0000000..41926ed
+index 0000000..632b6be
 --- /dev/null
 +++ b/Packages/MarkdownView/Sources/MarkdownView/MarkdownView+SwiftUI/MarkdownView+Representable.swift
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,69 @@
 +//
 +//  MarkdownView+Representable.swift
 +//  MarkdownView
@@ -14103,6 +14104,7 @@ index 0000000..41926ed
 +            updateMarkdownTextView(uiView, coordinator: context.coordinator)
 +        }
 +
++        @available(iOS 16.0, macOS 13.0, *)
 +        func sizeThatFits(
 +            _ proposal: ProposedViewSize,
 +            uiView: MarkdownTextView,
@@ -14132,6 +14134,7 @@ index 0000000..41926ed
 +            updateMarkdownTextView(nsView, coordinator: context.coordinator)
 +        }
 +
++        @available(iOS 16.0, macOS 13.0, *)
 +        func sizeThatFits(
 +            _ proposal: ProposedViewSize,
 +            nsView: MarkdownTextView,
@@ -15926,10 +15929,10 @@ index 0000000..076648b
 +}
 diff --git a/Packages/MarkdownView/Sources/MarkdownView/Supplements/MarkdownContentLocale.swift b/Packages/MarkdownView/Sources/MarkdownView/Supplements/MarkdownContentLocale.swift
 new file mode 100644
-index 0000000..eca487e
+index 0000000..43617c0
 --- /dev/null
 +++ b/Packages/MarkdownView/Sources/MarkdownView/Supplements/MarkdownContentLocale.swift
-@@ -0,0 +1,342 @@
+@@ -0,0 +1,374 @@
 +import Foundation
 +
 +@MainActor
@@ -16078,7 +16081,7 @@ index 0000000..eca487e
 +        if let cached = cjkLanguageByLocale[key] {
 +            return cached
 +        }
-+        let language = normalizedLanguage(locale.language)
++        let language = normalizedLanguage(locale)
 +        cjkLanguageByLocale[key] = language
 +        return language
 +    }
@@ -16103,27 +16106,59 @@ index 0000000..eca487e
 +    ///
 +    /// Any language that is not Chinese, Japanese or Korean falls back to
 +    /// Simplified Chinese, as it always has.
-+    static func normalizedLanguage(_ language: Locale.Language) -> String {
-+        switch language.languageCode {
-+        case .japanese?:
++    static func normalizedLanguage(_ locale: Locale) -> String {
++        var identifier = locale.identifier.replacingOccurrences(of: "_", with: "-")
++        for separator in [".", "@"] where identifier.contains(separator) {
++            identifier = String(identifier[..<identifier.firstIndex(of: Character(separator))!])
++        }
++        let parts = identifier.split(separator: "-").map(String.init)
++        guard let language = parts.first?.lowercased() else {
++            return "zh-Hans"
++        }
++        switch language {
++        case "ja":
 +            return "ja"
-+        case .korean?:
++        case "ko":
 +            return "ko"
-+        case .chinese?:
++        case "zh", "zho", "chi":
 +            break
 +        default:
 +            return "zh-Hans"
 +        }
 +
-+        let script = language.script
-+            ?? Locale.Language(identifier: language.maximalIdentifier).script
-+        guard script == .hanTraditional else {
-+            return "zh-Hans"
++        var script: String?
++        var region: String?
++        for part in parts.dropFirst() {
++            if part.count == 4, part.allSatisfy({ $0.isLetter }) {
++                script = part.lowercased()
++            } else if part.count == 2, part.allSatisfy({ $0.isLetter }) {
++                region = part.uppercased()
++            } else if part.count == 3, part.allSatisfy({ $0.isNumber }) {
++                region = part
++            }
 +        }
-+        guard let region = language.region, region != .taiwan else {
-+            return "zh-Hant"
++
++        let isTraditional: Bool
++        switch script {
++        case "hant"?:
++            isTraditional = true
++        case "hans"?:
++            isTraditional = false
++        default:
++            // No script subtag: the region decides, and Taiwan, Hong Kong and
++            // Macau are the regions that draw Traditional.
++            isTraditional = ["TW", "HK", "MO"].contains(region ?? "")
 +        }
-+        return "zh-Hant-\(region.identifier)"
++        guard isTraditional else { return "zh-Hans" }
++        guard let region, region != "TW" else { return "zh-Hant" }
++        return "zh-Hant-\(region)"
++    }
++
++    /// The same answer from the language alone. `Locale.Language` arrived in
++    /// iOS 16, so only the tests and macOS 13 read a locale this way.
++    @available(iOS 16.0, macOS 13.0, watchOS 9.0, tvOS 16.0, visionOS 1.0, *)
++    static func normalizedLanguage(_ language: Locale.Language) -> String {
++        normalizedLanguage(Locale(identifier: language.maximalIdentifier))
 +    }
 +
 +    private static func characterRanges(in string: String) -> [NSRange] {
