@@ -187,6 +187,32 @@ index 70af217..649a869 100644
          if savesPending.remove(id) != nil {
              persist(id, urgent: savesUrgent.remove(id) != nil)
          }
+diff --git a/Apelin/Interface/Projects/Distribution/DistributionPublishing.swift b/Apelin/Interface/Projects/Distribution/DistributionPublishing.swift
+index 40fc82b..82c5272 100644
+--- a/Apelin/Interface/Projects/Distribution/DistributionPublishing.swift
++++ b/Apelin/Interface/Projects/Distribution/DistributionPublishing.swift
+@@ -28,7 +28,7 @@ enum DistributionPublishing {
+     static func share(
+         _ item: Item,
+         from presenter: UIViewController,
+-        anchor: any UIPopoverPresentationControllerSourceItem,
++        anchor: UIBarButtonItem,
+         onShared: @escaping () -> Void = {},
+     ) async {
+         do {
+@@ -36,7 +36,11 @@ enum DistributionPublishing {
+                 try DistributionPackages.verify(path: item.path, digest: item.digest)
+             }.value
+             let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+-            sheet.popoverPresentationController?.sourceItem = anchor
++            if #available(iOS 16.0, *) {
++                sheet.popoverPresentationController?.sourceItem = anchor
++            } else {
++                sheet.popoverPresentationController?.barButtonItem = anchor
++            }
+             sheet.completionWithItemsHandler = { _, completed, _, _ in
+                 guard completed else { return }
+                 SharedPackages.record(item.digest)
 diff --git a/Apelin/Interface/Projects/Distribution/ProjectDistributionController.swift b/Apelin/Interface/Projects/Distribution/ProjectDistributionController.swift
 index 1349b57..b462a39 100644
 --- a/Apelin/Interface/Projects/Distribution/ProjectDistributionController.swift
@@ -222,6 +248,47 @@ index 64fde5b..9ca56bf 100644
                      return false
                  }
                  let first = await group.next() ?? false
+diff --git a/Apelin/Interface/Root/SidebarController.swift b/Apelin/Interface/Root/SidebarController.swift
+index a2ad3f0..df4e77a 100644
+--- a/Apelin/Interface/Root/SidebarController.swift
++++ b/Apelin/Interface/Root/SidebarController.swift
+@@ -148,7 +148,9 @@ final class SidebarController: UIViewController {
+                 completion(self?.projectMenu().children ?? [])
+             }]),
+         )
+-        item.preferredMenuElementOrder = .fixed
++        if #available(iOS 16.0, *) {
++            item.preferredMenuElementOrder = .fixed
++        }
+         item.accessibilityLabel = String(localized: "Projects")
+         return item
+     }()
+@@ -165,7 +167,9 @@ final class SidebarController: UIViewController {
+             image: UIImage(systemName: "folder.badge.plus"),
+         ) { [weak self] _ in self?.openNewProject() }
+         let item = UIBarButtonItem(image: UIImage(systemName: "plus"), menu: UIMenu(children: [newChat, newProject]))
+-        item.preferredMenuElementOrder = .fixed
++        if #available(iOS 16.0, *) {
++            item.preferredMenuElementOrder = .fixed
++        }
+         item.accessibilityLabel = String(localized: "New")
+         return item
+     }()
+@@ -244,9 +248,11 @@ final class SidebarController: UIViewController {
+         view.backgroundColor = .panelBackground
+ 
+         // The project name stays at the leading edge; the folder owns switching.
+-        navigationItem.style = .editor
+-        // under the bar, hidden until the list is pulled down
+-        navigationItem.preferredSearchBarPlacement = .stacked
++        if #available(iOS 16.0, *) {
++            navigationItem.style = .editor
++            // under the bar, hidden until the list is pulled down
++            navigationItem.preferredSearchBarPlacement = .stacked
++        }
+         navigationItem.hidesSearchBarWhenScrolling = true
+         // Making things stays in the top bar; project switching lives below.
+         navigationItem.rightBarButtonItems = [newMenuButton]
 diff --git a/Apelin/Interface/Settings/Accounts/ModelProvidersController.swift b/Apelin/Interface/Settings/Accounts/ModelProvidersController.swift
 index 1d7b4b8..bd5b45d 100644
 --- a/Apelin/Interface/Settings/Accounts/ModelProvidersController.swift
@@ -248,6 +315,26 @@ index a2f5bc2..3df05c5 100644
          ) { [weak self] _ in
              self?.editTitle()
          })
+diff --git a/Apelin/Interface/Settings/Logs/LogViewerController+Menu.swift b/Apelin/Interface/Settings/Logs/LogViewerController+Menu.swift
+index 8d88999..f801ce1 100644
+--- a/Apelin/Interface/Settings/Logs/LogViewerController+Menu.swift
++++ b/Apelin/Interface/Settings/Logs/LogViewerController+Menu.swift
+@@ -55,10 +55,14 @@ extension LogViewerController {
+             children: categoryActions.isEmpty ? emptyCategories : categoryActions,
+         )
+ 
++        var onlyFailuresAttributes: UIMenuElement.Attributes = []
++        if #available(iOS 16.0, *) {
++            onlyFailuresAttributes.insert(.keepsMenuPresented)
++        }
+         let onlyFailuresAction = UIAction(
+             title: String(localized: "Errors Only"),
+             image: UIImage(systemName: "exclamationmark.triangle"),
+-            attributes: .keepsMenuPresented,
++            attributes: onlyFailuresAttributes,
+             state: selectedLevels == [.error, .critical] ? .on : .off,
+             handler: { [weak self] action in
+                 guard let self else { return }
 diff --git a/Apelin/Resources/Localizable.xcstrings b/Apelin/Resources/Localizable.xcstrings
 index c178c13..e8e3588 100644
 --- a/Apelin/Resources/Localizable.xcstrings
