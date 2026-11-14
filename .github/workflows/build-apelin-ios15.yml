@@ -1,0 +1,80 @@
+name: apelin-ios15
+
+on:
+  push:
+    branches: [apelin-ios15]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 240
+
+    steps:
+      - name: Check out build recipe
+        uses: actions/checkout@v4
+
+      - name: Show runner and Xcode images
+        run: |
+          uname -m
+          sw_vers
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          xcodebuild -version || true
+          xcrun --sdk iphoneos --show-sdk-version || true
+
+      - name: Select the newest Xcode
+        run: |
+          set -euo pipefail
+          newest="$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)"
+          echo "selecting $newest"
+          sudo xcode-select -s "$newest/Contents/Developer"
+          xcodebuild -version
+          echo "iPhoneOS SDK $(xcrun --sdk iphoneos --show-sdk-version)"
+
+      - name: Install packaging dependencies
+        run: |
+          set -euo pipefail
+          brew install dpkg ldid zstd || true
+          command -v dpkg-deb && command -v ldid && command -v zstd
+
+      - name: Fetch upstream at the patched commit and apply the iOS 15 patch
+        run: |
+          set -euo pipefail
+          git clone https://github.com/owngoal-dev/Apelin.git src
+          cd src
+          git checkout 2de0946
+          git apply --verbose "$GITHUB_WORKSPACE/apelin-ios15.patch"
+          grep -n "IPHONEOS_DEPLOYMENT_TARGET" Configuration/Base.xcconfig
+
+      - name: Build
+        working-directory: src
+        run: |
+          set -euo pipefail
+          sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "SDK=$sdk"
+          make build SKIP_HARNESS=1 CONFIGURATION=Release \
+            IOS_SDK_TIER="$sdk" BUILD_NUMBER="$GITHUB_RUN_NUMBER"
+
+      - name: Package roothide and rootless
+        working-directory: src
+        run: |
+          set -euo pipefail
+          sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+          make _package FLAVOR=roothide IOS_SDK_TIER="$sdk" BUILD_NUMBER="$GITHUB_RUN_NUMBER"
+          make _package FLAVOR=rootless IOS_SDK_TIER="$sdk" BUILD_NUMBER="$GITHUB_RUN_NUMBER"
+          ls -lh build/Packages/*.deb
+          for f in build/Packages/*.deb; do
+            echo "=== $f"
+            dpkg-deb -f "$f"
+            dpkg-deb -c "$f" | head -20
+          done
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: apelin-ios15-debs
+          path: src/build/Packages/*.deb
+          if-no-files-found: error
