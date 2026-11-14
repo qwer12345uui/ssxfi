@@ -188,28 +188,63 @@ index 70af217..649a869 100644
              persist(id, urgent: savesUrgent.remove(id) != nil)
          }
 diff --git a/Apelin/Interface/Projects/Distribution/DistributionPublishing.swift b/Apelin/Interface/Projects/Distribution/DistributionPublishing.swift
-index 40fc82b..82c5272 100644
+index 40fc82b..d02c126 100644
 --- a/Apelin/Interface/Projects/Distribution/DistributionPublishing.swift
 +++ b/Apelin/Interface/Projects/Distribution/DistributionPublishing.swift
-@@ -28,7 +28,7 @@ enum DistributionPublishing {
+@@ -25,18 +25,54 @@ enum DistributionPublishing {
+ 
+     /// The share sheet with the package, pointing at `anchor`; a share that
+     /// completes makes it Shared (`SharedPackages`) and calls `onShared`.
++    ///
++    /// The popover's anchor is the item or the view it hangs from: iOS 16
++    /// takes either as `sourceItem`, and on 15 a bar button item and a view
++    /// are set by two different properties.
      static func share(
          _ item: Item,
          from presenter: UIViewController,
 -        anchor: any UIPopoverPresentationControllerSourceItem,
 +        anchor: UIBarButtonItem,
          onShared: @escaping () -> Void = {},
-     ) async {
-         do {
-@@ -36,7 +36,11 @@ enum DistributionPublishing {
-                 try DistributionPackages.verify(path: item.path, digest: item.digest)
-             }.value
-             let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
--            sheet.popoverPresentationController?.sourceItem = anchor
++    ) async {
++        await share(item, from: presenter, onShared: onShared) { sheet in
 +            if #available(iOS 16.0, *) {
 +                sheet.popoverPresentationController?.sourceItem = anchor
 +            } else {
 +                sheet.popoverPresentationController?.barButtonItem = anchor
 +            }
++        }
++    }
++
++    /// The same sheet, pointing at the row's own view.
++    static func share(
++        _ item: Item,
++        from presenter: UIViewController,
++        anchor: UIView,
++        onShared: @escaping () -> Void = {},
++    ) async {
++        await share(item, from: presenter, onShared: onShared) { sheet in
++            if #available(iOS 16.0, *) {
++                sheet.popoverPresentationController?.sourceItem = anchor
++            } else {
++                sheet.popoverPresentationController?.sourceView = anchor
++                sheet.popoverPresentationController?.sourceRect = anchor.bounds
++            }
++        }
++    }
++
++    private static func share(
++        _ item: Item,
++        from presenter: UIViewController,
++        onShared: @escaping () -> Void,
++        pointingAt anchor: (UIActivityViewController) -> Void,
+     ) async {
+         do {
+             let file = try await Task.detached {
+                 try DistributionPackages.verify(path: item.path, digest: item.digest)
+             }.value
+             let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+-            sheet.popoverPresentationController?.sourceItem = anchor
++            anchor(sheet)
              sheet.completionWithItemsHandler = { _, completed, _, _ in
                  guard completed else { return }
                  SharedPackages.record(item.digest)
